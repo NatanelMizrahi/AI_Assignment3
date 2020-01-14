@@ -71,6 +71,7 @@ class Node:
     def __init__(self, label):
         self.label = label
         # dijkstra algorithm aux variables:
+        self.visited = False
         self.d = 0
         self.prev = None
 
@@ -91,9 +92,9 @@ class Node:
 
 
 class Edge:
-    def __init__(self, v1: Node, v2: Node, w=0, label=''):
+    def __init__(self, v1: Node, v2: Node, w=1, label='', directed=False):
         """edge created lexicographically by its vertices names"""
-        if v2 < v1:
+        if v2 < v1 and not directed:
             v1, v2 = v2, v1  #
         self.label = label
         self.v1 = v1
@@ -139,13 +140,6 @@ class Graph:
         self.V[v] = set([])
         self.n_vertices += 1
 
-    def remove_vertex(self, v):
-        if v not in self.V:
-            raise Exception("{} not in V".format(v))
-        for u in self.V[v]:
-            self.remove_edge(v, u)
-        self.n_vertices -= 1
-
     def get_edge(self, v1, v2):
         return self.Adj.get((v1, v2))
 
@@ -167,24 +161,8 @@ class Graph:
         self.Adj[v1, v2] = e
         self.Adj[v2, v1] = e
 
-    def remove_edge(self, v1, v2):
-        self.edge_exists_check(v1, v2, expected=True)
-        self.V[v1].remove(v2)
-        self.V[v2].remove(v1)
-        del self.Adj[v1, v2]
-        del self.Adj[v2, v1]
-
-    def block_edge(self, v1, v2, block_time):
-        self.edge_exists_check(v1, v2, expected=True)
-        e = self.get_edge(v1, v2)
-        e.blocked = True
-        e.deadline = block_time
-
-    def is_blocked(self, u, v):
-        return self.get_edge(u, v).blocked
-
     def neighbours(self, u):
-        return [v for v in self.V[u] if not self.is_blocked(u, v)]
+        return self.V[u]
 
     def get_vertices(self):
         return self.V.keys()
@@ -192,10 +170,16 @@ class Graph:
     def get_edges(self):
         return self.Adj.values()
 
+    def get_display_graph(self):
+        return nx.Graph()
+
+    def get_layout(self, G):
+        return nx.spring_layout(G, scale=25)
+
     def display(self, graph_id=0, output_path='.', save_img=False):
         filename = '{0}/graph_{1}.png'.format(output_path, graph_id)
         V = self.get_vertices()
-        G = nx.Graph()
+        G = self.get_display_graph()
         G.add_nodes_from(V)
         G.add_weighted_edges_from([e.get() for e in self.Adj.values() if not e.blocked])
         edge_labels = nx.get_edge_attributes(G, 'weight')
@@ -204,7 +188,7 @@ class Graph:
             return
         if self.pos is None:
             # save node position to maintain the same graph layout throughout simulations
-            self.pos = nx.spring_layout(G, scale=25)
+            self.pos = self.get_layout(G)
         nx.draw(G, self.pos, node_size=1700, with_labels=False)
         nx.draw_networkx_edge_labels(G, self.pos, edge_labels=edge_labels, rotate=False)
         nx.draw_networkx_labels(G, self.pos, node_labels, font_size=7.5, font_weight='bold')
@@ -266,3 +250,46 @@ class Graph:
                         v.d = val
                         v.prev = u
                         Q.decrease_key(v)
+
+
+class DiGraph(Graph):
+    def add_edge(self, e: Edge):
+        v1 = e.v1
+        v2 = e.v2
+        self.edge_exists_check(v1, v2, expected=False)
+        self.V[v1].add(v2)
+        self.Adj[v1, v2] = e
+
+    def get_display_graph(self):
+        return nx.DiGraph()
+
+    def get_layout(self, G):
+        return nx.spectral_layout(G, scale=25)
+
+    # Topology Sort #
+    # Reference: geeksforgeeks.org
+    def topological_sort_rec(self, v: Node, stack: Stack):
+
+        v.visited = True          # Mark the current node as visited.
+        # recursive step for all v's neighbours
+        for u in self.neighbours(v):
+            if not u.visited:
+                self.topological_sort_rec(u, stack)
+        stack.push(v)
+
+    def topological_sort_init(self):
+        for v in self.get_vertices():
+            v.visited = False
+
+    def topological_sort(self):
+        self.topological_sort_init()
+        stack = Stack()
+        # Call the recursive helper function to store Topological Sort starting from all vertices one by one
+        for v in self.get_vertices():
+            if not v.visited:
+                self.topological_sort_rec(v, stack)
+
+        ordered = []
+        while not stack.is_empty():
+            ordered.append(stack.pop())
+        return ordered

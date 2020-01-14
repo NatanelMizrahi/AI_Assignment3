@@ -1,6 +1,7 @@
-from utils.data_structures import Node, Edge, Graph
+from utils.data_structures import Node, Edge, Graph, DiGraph
 from typing import List, Set, Union, Dict, Tuple
-
+import random
+from configurator import Configurator
 def rnd(frac):
     return round(frac, 4)
 
@@ -10,8 +11,9 @@ def bool2str(b):
 
 
 COMPACT = False
-leakage = 0.001
-
+UNASSIGNED = None
+LEAKAGE = 0.001
+RAND_SEED = 42
 
 class BNNode(Node):
     """Represents a node in the Bayes-Network, with probability for being flooded or blocked"""
@@ -25,8 +27,12 @@ class BNNode(Node):
         self.element = element
         self.time = int(time)
         self.chance = float(chance)
-        self.flooded = False # or blocked
+        self.value = UNASSIGNED  # flooded or blocked - None | True | False
+        self.temp = UNASSIGNED
         self.parents: List[BNNode] = parents
+        self.children = []
+        for p in self.parents:
+            p.children.append(self)
         self.P = self.get_conditional_probabilities()
 
     def get_conditional_probabilities(self):
@@ -44,6 +50,14 @@ class BNNode(Node):
     @staticmethod
     def get_all_bn_nodes() -> List[Node]:
         return sorted(FloodBNNode.NODES.values()) + sorted(EdgeBNNode.EDGES.values())
+
+    @staticmethod
+    def get_all_bn_vertex() -> List[Node]:
+        return sorted(FloodBNNode.NODES.values())
+
+    def get_node_probability(self):
+        '''Implemented by child classes'''
+        pass
 
 
 class FloodBNNode(BNNode):
@@ -69,6 +83,15 @@ class FloodBNNode(BNNode):
                 flooded_last_tick:  FloodBNNode.P_PERSISTENCE,
             not flooded_last_tick:  original_chance
         }
+
+    def get_node_probability(self):
+        if not self.has_parents():
+            return self.chance
+        else:
+            parent_flooded = self.parents[0].temp  # parent's assignment for the current sample) - treated as a fact
+            return self.P[parent_flooded]
+            # pf = self.parents[0].get_node_probability()  # prob his parent is flooded
+            # return rnd(pf * self.P[True] + (1 - pf) * self.P[False])
 
     def print_probability_table(self, compact=COMPACT):
         print("{}, time {}".format(self.v, self.time))
@@ -102,7 +125,7 @@ class EdgeBNNode(BNNode):
     def get_conditional_probabilities(self):
             qi = 1 - 0.6 / self.element.w
             return {
-                (False, False): leakage,
+                (False, False): LEAKAGE,
                 (False, True):  1 - qi,
                 (True, False):  1 - qi,
                 (True, True):   1 - qi ** 2
@@ -121,34 +144,112 @@ class EdgeBNNode(BNNode):
                                                                         self.parents[1], bool2str(flooded_v2),
                                                                         chance))
 
+    def get_node_probability(self):
+        # parents' assignments for the current sample) - treated as a fact
+        v1_flooded = self.parents[0].temp
+        v2_flooded = self.parents[1].temp
+        return self.P[v1_flooded, v2_flooded]
+
 
 class BayesNetwork:
-    def __init__(self, V, E):
-        self.V = V
-        self.E = E
-        self.print_net()
+    def __init__(self, V):
+        E = []
+        for p in V:
+            for c in p.children:
+                E.append(Edge(p, c, directed=True))
+        self.V: List[BNNode] = V
+        self.E: List[Edge] = []
+        self.G: DiGraph = DiGraph(V, E)
+        self.nodes: Dict[Tuple[str, int], BNNode] = {}
+        for bn_node in V:
+            label, t = bn_node.element.label, bn_node.time
+            self.nodes[label, t] = bn_node
+        self.top_sorted_V: List[BNNode] = self.G.topological_sort()
+        # self.print_net()
 
-    @staticmethod
-    def print_net():
-        for bn in BNNode.get_all_bn_nodes():
+    def get_nodes(self):
+        return sorted(self.V)
+        # for v in sorted(self.V):
+        #     yield v
+        # for e in sorted(self.E):
+        #     yield e
+
+    def print_net(self):
+        for bn in self.get_nodes():
             bn.print_probability_table()
+        self.G.display('Bayes Network')
 
+    def reset_evidence(self):
+        for bn in self.get_nodes():
+            bn.value = UNASSIGNED
 
-class SmartGraph(Graph):
-    """A variation of a graph that accounts for edge and node deadlines when running dijkstra"""
+    def get_node(self, label, t):
+        return self.nodes.get((label, t))
 
-    def __init__(self, V: List[Node]=[], E: List[Edge]=[], env=None):
-        """:param env: the enclosing environment in which the graph "lives". Used to access the environment's time."""
-        super().__init__(V, E)
-        self.env = env
+    """SAMPLING"""
+    def get_evidence(self):
+        return {v: v.value for v in self.get_nodes() if v.value is not UNASSIGNED}
 
-    def is_blocked(self, u, v):
-        e = self.get_edge(u, v)
-        return e.blocked or self.env.time + e.w > e.deadline
+    def get_single_weighted_sample(self):
+        """Weighted likelihood sampling - generate a single sample"""
+        sample = {}
+        weight = 1
+        for v in self.top_sorted_V:
+            v.temp = UNASSIGNED
+            conditional_prob = v.get_node_probability()
+            if v.value is not UNASSIGNED:
+                # v is an evidence var. it is fixed and accounted for by re-weighting with it's probability as a factor
+                v.temp = v.value
+                weight *= conditional_prob
+            else:
+                # assign a "True" value to the node with this probability
+                v.temp = random.random() < conditional_prob
+            sample[v] = v.temp
+        return sample, weight
 
+    def generate_weighted_samples(self):
+        """Weighted likelihood sampling - generate a set of samples"""
+        random.seed(RAND_SEED)
+        weighted_samples: List[Tuple[Dict[BNNode,bool]], float] = \
+            [self.get_single_weighted_sample() for i in range(Configurator.sample_size)]
+        return weighted_samples
 
-class Environment:
-    def __init__(self, G: SmartGraph):
-        self.time = 0
-        self.G = G
-        self.blocked_edges: Set[Edge] = set([])
+    def sample_consistant_with_assignment(self, sw, a):
+        s, _ = sw
+        for v, val in a.items():
+            if s[v] != a[v]:
+                return False
+        return True
+
+    def filter_samples(self, weighted_samples, assignment):
+        return [s for s in weighted_samples if self.sample_consistant_with_assignment(s, assignment)]
+
+    def filter_by_evidence(self, weighted_samples):
+        evidence: Dict[BNNode, bool] = self.get_evidence()
+        return self.filter_samples(weighted_samples, evidence)
+
+    def sample(self, weighted_samples, query: Dict[BNNode, bool]):
+        """
+        Weighted likelihood sampling
+        :param query: a dict of {BNNode(BayerNetworkNode):value(True/False)}
+        :return: a sampling based probability for the query given the evidence
+        """
+        matching_samples = self.filter_samples(weighted_samples, query)
+        total_weight = sum([weight for sample, weight in weighted_samples])
+        match_weight = sum([weight for sample, weight in matching_samples])
+        return match_weight/total_weight
+
+    def query_results(self, query, prob, evidence):
+        def join(q):
+            return ','.join(['{}={}'.format(v, bool2str(val)) for v, val in q.items()])
+
+        return 'P({}{}{}) = {}'.format(join(query), '| ' if evidence else '', join(evidence), rnd(prob))
+
+    def sample_queries(self, queries: List[Dict[BNNode, bool]]):
+        weighted_samples = self.generate_weighted_samples()
+        evidence = self.get_evidence()
+        # weighted_samples = self.filter_by_evidence(weighted_samples)  # redundant in Likelihood Weighting
+        queries_results = [(query, self.sample(weighted_samples, query)) for query in queries]
+        query_results_str = [self.query_results(query, prob, evidence) for query, prob in queries_results]
+        print('\n'.join(query_results_str))
+
