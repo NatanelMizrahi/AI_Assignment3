@@ -1,11 +1,9 @@
 import re
 from configurator import Configurator
-from random import choice as rand_choice
 from utils.data_structures import Edge, Node, Graph
-from environment import FloodBNNode, EdgeBNNode, BayesNetwork, BNNode
+from bayes_network import FloodBNNode, EdgeBNNode, BayesNetwork
 
 fraction_re = re.compile("(1(?:\.0)?|0\.[0-9]+)")
-leakage = 0.001
 TEST_MODE = True
 
 
@@ -19,18 +17,15 @@ class Simulator:
 
     @staticmethod
     def get_graph():
-        if Configurator.graph_path is 'random':
-            return Configurator.randomize_config()
-        else:
-            return Simulator.parse_graph(Configurator.graph_path)
+        return Simulator.parse_graph(Configurator.graph_path)
 
     @staticmethod
     def parse_graph(path):
         """Parse and create graph from tests file, syntax same as in assignment instructions"""
         num_v_pattern = re.compile("#N\s+(\d+)")
-        node_pattern = re.compile("#V(\d+)\s+F\s+"+fraction_re.pattern)
         edge_pattern = re.compile("#(E\d+)\s+(\d+)\s+(\d+)\s+W(\d+)")
-        persistence_pattern = re.compile("#Ppersistence\s+"+fraction_re.pattern)
+        node_pattern = re.compile("#V(\d+)\s+F\s+" + fraction_re.pattern)
+        persistence_pattern = re.compile("#Ppersistence\s+" + fraction_re.pattern)
 
         p_persistence = 0
         bn_node_dict = {}
@@ -78,6 +73,7 @@ class Simulator:
         V = list(node_dict.values())
 
         # generate the rest of the Bayes Network nodes after parsing is done
+        # order matters: vertices in each time unit before edges
         for t in range(1, Configurator.T):
             for v in V:
                 bn_nodes.append(FloodBNNode(v, t))
@@ -90,7 +86,7 @@ class Simulator:
         if TEST_MODE:
             block_pattern = re.compile("(~)?B\(E(\d+),\s*(\d+)\)")
             flood_pattern = re.compile("(~)?F\(V(\d+),\s*(\d+)\)")
-            evidence_prompt = 'type in evidence e.g. "~B(Ei,t)","F(Vi,t)". ^C or "end" to return to menu\n'
+            evidence_prompt = 'type in evidence e.g. "~B(E1,0)","F(V1,1)". ^C or type "end" to return to menu\n'
         else:
             block_pattern = re.compile("(No\s+)?blockage reported at edge (\d+) at time (\d+)", re.IGNORECASE)
             flood_pattern = re.compile("(No\s+)?Flood reported at vertex (\d+) at time (\d+)", re.IGNORECASE)
@@ -127,6 +123,7 @@ class Simulator:
                     continue
 
                 bn_node.value = is_blocked_or_flooded
+                print('fixed {} = {}'.format(bn_node, bn_node.value))
 
         except KeyboardInterrupt:  # ^C pressed
             return
@@ -139,8 +136,6 @@ class Simulator:
         block_queries = [{v: True} for v in self.BN.V if isinstance(v, EdgeBNNode)]
         self.BN.sample_queries(block_queries)
 
-        pass
-
     def query_free_path_probability(self):
         pass
 
@@ -151,6 +146,10 @@ class Simulator:
     def reset_evidence(self):
         self.BN.reset_evidence()
         print('Evidence reset.')
+
+    def view_evidence(self):
+        for var, val in self.BN.get_evidence().items():
+            print(var, '=', val)
 
     def quit(self):
         exit(0)
@@ -163,7 +162,8 @@ class Simulator:
             4 - Query Free Path Probability
             5 - Print Graph
             6 - Reset Evidence
-            7 - Quit\n"""
+            7 - View Evidence
+            8 - Quit\n"""
 
         ops = {
             1: self.add_evidence,
@@ -172,7 +172,8 @@ class Simulator:
             4: self.query_free_path_probability,
             5: self.print_graph,
             6: self.reset_evidence,
-            7: self.quit
+            7: self.view_evidence,
+            8: self.quit
         }
 
         while True:

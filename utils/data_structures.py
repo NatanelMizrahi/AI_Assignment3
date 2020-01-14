@@ -44,24 +44,24 @@ class Heap:
 
 class Stack:
     def __init__(self):
-        self.stack = []
+        self.items = []
 
     def is_empty(self):
-        return len(self.stack) == 0
+        return len(self.items) == 0
 
     def push(self, element):
-        self.stack.append(element)
+        self.items.append(element)
 
     def pop(self):
         try:
-            return self.stack.pop()
+            return self.items.pop()
         except:
             raise Exception("Error: {} empty!!".format(self.__class__.__name__))
 
 
 class Queue(Stack):
     def push(self, element):
-        self.stack.insert(0, element)
+        self.items.insert(0, element)
 
 
 ## GRAPH ##
@@ -70,8 +70,9 @@ class Node:
 
     def __init__(self, label):
         self.label = label
-        # dijkstra algorithm aux variables:
+        # Topology Sort algorithm aux variables:
         self.visited = False
+        # Dijkstra algorithm aux variables:
         self.d = 0
         self.prev = None
 
@@ -93,9 +94,9 @@ class Node:
 
 class Edge:
     def __init__(self, v1: Node, v2: Node, w=1, label='', directed=False):
-        """edge created lexicographically by its vertices names"""
+        """edge created lexicographically by its vertices names, except when graph is directed"""
         if v2 < v1 and not directed:
-            v1, v2 = v2, v1  #
+            v1, v2 = v2, v1
         self.label = label
         self.v1 = v1
         self.v2 = v2
@@ -189,8 +190,9 @@ class Graph:
         if self.pos is None:
             # save node position to maintain the same graph layout throughout simulations
             self.pos = self.get_layout(G)
+        if not isinstance(self, DirectedGraph):
+            nx.draw_networkx_edge_labels(G, self.pos, edge_labels=edge_labels, rotate=False)
         nx.draw(G, self.pos, node_size=1700, with_labels=False)
-        nx.draw_networkx_edge_labels(G, self.pos, edge_labels=edge_labels, rotate=False)
         nx.draw_networkx_labels(G, self.pos, node_labels, font_size=7.5, font_weight='bold')
         plt.margins(0.2)
         plt.legend([], title=graph_id, loc='upper center')
@@ -252,7 +254,7 @@ class Graph:
                         Q.decrease_key(v)
 
 
-class DiGraph(Graph):
+class DirectedGraph(Graph):
     def add_edge(self, e: Edge):
         v1 = e.v1
         v2 = e.v2
@@ -269,7 +271,6 @@ class DiGraph(Graph):
     # Topology Sort #
     # Reference: geeksforgeeks.org
     def topological_sort_rec(self, v: Node, stack: Stack):
-
         v.visited = True          # Mark the current node as visited.
         # recursive step for all v's neighbours
         for u in self.neighbours(v):
@@ -288,8 +289,4 @@ class DiGraph(Graph):
         for v in self.get_vertices():
             if not v.visited:
                 self.topological_sort_rec(v, stack)
-
-        ordered = []
-        while not stack.is_empty():
-            ordered.append(stack.pop())
-        return ordered
+        return list(reversed(stack.items))

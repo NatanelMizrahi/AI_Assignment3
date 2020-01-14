@@ -1,7 +1,9 @@
-from utils.data_structures import Node, Edge, Graph, DiGraph
-from typing import List, Set, Union, Dict, Tuple
-import random
+from utils.data_structures import Node, Edge, DirectedGraph
+from typing import List, Union, Dict, Tuple
 from configurator import Configurator
+import random
+
+
 def rnd(frac):
     return round(frac, 4)
 
@@ -12,8 +14,8 @@ def bool2str(b):
 
 COMPACT = False
 UNASSIGNED = None
-LEAKAGE = 0.001
 RAND_SEED = 42
+LEAKAGE = 0.001
 
 class BNNode(Node):
     """Represents a node in the Bayes-Network, with probability for being flooded or blocked"""
@@ -152,27 +154,22 @@ class EdgeBNNode(BNNode):
 
 
 class BayesNetwork:
-    def __init__(self, V):
+    def __init__(self, V: List[BNNode]):
         E = []
         for p in V:
             for c in p.children:
                 E.append(Edge(p, c, directed=True))
         self.V: List[BNNode] = V
         self.E: List[Edge] = []
-        self.G: DiGraph = DiGraph(V, E)
+        self.G: DirectedGraph = DirectedGraph(V, E)
         self.nodes: Dict[Tuple[str, int], BNNode] = {}
         for bn_node in V:
             label, t = bn_node.element.label, bn_node.time
             self.nodes[label, t] = bn_node
         self.top_sorted_V: List[BNNode] = self.G.topological_sort()
-        # self.print_net()
 
     def get_nodes(self):
         return sorted(self.V)
-        # for v in sorted(self.V):
-        #     yield v
-        # for e in sorted(self.E):
-        #     yield e
 
     def print_net(self):
         for bn in self.get_nodes():
@@ -216,7 +213,7 @@ class BayesNetwork:
 
     def sample_consistant_with_assignment(self, sw, a):
         s, _ = sw
-        for v, val in a.items():
+        for v in a.keys():
             if s[v] != a[v]:
                 return False
         return True
@@ -231,7 +228,8 @@ class BayesNetwork:
     def sample(self, weighted_samples, query: Dict[BNNode, bool]):
         """
         Weighted likelihood sampling
-        :param query: a dict of {BNNode(BayerNetworkNode):value(True/False)}
+        :param query: a dict of {BNNode(BayerNetworkNode):value(True/False)} pairs
+        :param weighted_samples: a list of tuples containing: a dict ({BNNode:value} pairs) and weight for each sample
         :return: a sampling based probability for the query given the evidence
         """
         matching_samples = self.filter_samples(weighted_samples, query)
