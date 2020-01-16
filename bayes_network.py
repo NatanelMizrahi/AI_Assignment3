@@ -3,6 +3,9 @@ from typing import List, Union, Dict, Tuple
 from configurator import Configurator
 import random
 
+UNASSIGNED = None
+LEAKAGE = 0.001
+
 
 def rnd(frac):
     return round(frac, 4)
@@ -12,10 +15,8 @@ def bool2str(b):
     return str(b)[0]
 
 
-COMPACT = False
-UNASSIGNED = None
-RAND_SEED = 42
-LEAKAGE = 0.001
+class NotImplementedException(Exception):
+    pass
 
 class BNNode(Node):
     """Represents a node in the Bayes-Network, with probability for being flooded or blocked"""
@@ -58,14 +59,13 @@ class BNNode(Node):
         return sorted(FloodBNNode.NODES.values())
 
     def get_node_probability(self):
-        '''Implemented by child classes'''
-        pass
+        raise NotImplementedException("Must be implemented by child classes")
 
 
 class FloodBNNode(BNNode):
     """Represents a node in the Bayes-Network, with probability for being flooded"""
     NODES: Dict[Tuple[Node, int], BNNode] = {}
-    P_PERSISTENCE = 0
+    P_PERSISTENCE = 0  # modified in Simulator.parse_graph()
 
     @staticmethod
     def get_bn_edge_parents(e, t) -> List[BNNode]:
@@ -95,12 +95,12 @@ class FloodBNNode(BNNode):
             # pf = self.parents[0].get_node_probability()  # prob his parent is flooded
             # return rnd(pf * self.P[True] + (1 - pf) * self.P[False])
 
-    def print_probability_table(self, compact=COMPACT):
-        print("{}, time {}".format(self.v, self.time))
+    def print_probability_table(self):
+        print("{}, time {}:".format(self.v, self.time))
         if self.has_parents():
             for parent_flooded in [False, True]:
                 chance = rnd(self.P[parent_flooded])
-                if compact:
+                if Configurator.compact:
                     print("\tT | {} = {}".format(bool2str(parent_flooded), chance))
                 else:
                     print("\tP({} = T | {} = {}) = {}".format(self,
@@ -109,7 +109,7 @@ class FloodBNNode(BNNode):
         else:
             for flooded in [False, True]:
                 chance = rnd(self.chance if flooded else 1 - self.chance)
-                if compact:
+                if Configurator.compact:
                     print("\t{} | {}".format(bool2str(flooded), chance))
                 else:
                     print("\tP({} = {}) = {}".format(self, bool2str(flooded), chance))
@@ -133,12 +133,12 @@ class EdgeBNNode(BNNode):
                 (True, True):   1 - qi ** 2
             }
 
-    def print_probability_table(self, compact=COMPACT):
-        print("{}, time {}".format(self.e.label, self.time))
+    def print_probability_table(self):
+        print("{}, time {}:".format(self.e.label, self.time))
         for flooded_v1 in [False, True]:
             for flooded_v2 in [False, True]:
                 chance = rnd(self.P[flooded_v1, flooded_v2])
-                if compact:
+                if Configurator.compact:
                     print("\t{} {} | {}".format(bool2str(flooded_v1), bool2str(flooded_v2), chance))
                 else:
                     print("\tP({} = T | {} = {} , {} = {}) = {}".format(self.label,
@@ -206,7 +206,8 @@ class BayesNetwork:
 
     def generate_weighted_samples(self):
         """Weighted likelihood sampling - generate a set of samples"""
-        random.seed(RAND_SEED)
+        if Configurator.seed != 0:
+            random.seed(Configurator.seed)
         weighted_samples: List[Tuple[Dict[BNNode,bool]], float] = \
             [self.get_single_weighted_sample() for i in range(Configurator.sample_size)]
         return weighted_samples
@@ -237,17 +238,22 @@ class BayesNetwork:
         match_weight = sum([weight for sample, weight in matching_samples])
         return match_weight/total_weight
 
-    def query_results(self, query, prob, evidence):
+    def query_results_tostring(self, query, evidence, prob):
         def join(q):
             return ','.join(['{}={}'.format(v, bool2str(val)) for v, val in q.items()])
 
         return 'P({}{}{}) = {}'.format(join(query), '| ' if evidence else '', join(evidence), rnd(prob))
 
-    def sample_queries(self, queries: List[Dict[BNNode, bool]]):
+    def print_query_result(self, query_evidence_prob: Tuple[Dict[BNNode, bool],Dict[BNNode, bool],float]):
+        query, evidence, prob = query_evidence_prob
+        print(self.query_results_tostring(query, evidence, prob))
+
+    def sample_queries(self, queries: List[Dict[BNNode, bool]], verbose=True):
         weighted_samples = self.generate_weighted_samples()
         evidence = self.get_evidence()
         # weighted_samples = self.filter_by_evidence(weighted_samples)  # redundant in Likelihood Weighting
-        queries_results = [(query, self.sample(weighted_samples, query)) for query in queries]
-        query_results_str = [self.query_results(query, prob, evidence) for query, prob in queries_results]
-        print('\n'.join(query_results_str))
-
+        queries_results = [(query, evidence, self.sample(weighted_samples, query)) for query in queries]
+        if verbose:
+            for query_result in queries_results:
+                self.print_query_result(query_result)
+        return queries_results

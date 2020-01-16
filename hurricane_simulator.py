@@ -7,6 +7,10 @@ fraction_re = re.compile("(1(?:\.0)?|0\.[0-9]+)")
 TEST_MODE = True
 
 
+def get_list_input(prompt):
+    return input(prompt+'\n').upper().replace(' ', '').split(',')
+
+
 class Simulator:
     """Hurricane evacuation simulator"""
 
@@ -30,8 +34,7 @@ class Simulator:
         p_persistence = 0
         bn_node_dict = {}
         node_dict = {}
-        bn_nodes = []
-        bn_edges = []
+        bn_nodes = []  # list of nodes for the Bayer Network. Each node represents either an edge/vertex at some time t
         E = []
 
         with open(path, 'r') as f:
@@ -52,7 +55,7 @@ class Simulator:
                         index = str(i)
                         new_node = Node('V'+index)
                         node_dict[index] = new_node
-                        new_bn_node = FloodBNNode(new_node, t, chance=0, p_persistence=p_persistence)
+                        new_bn_node = FloodBNNode(v=new_node, time=t, chance=0, p_persistence=p_persistence)
                         bn_nodes.append(new_bn_node)
                         bn_node_dict[index, t] = new_bn_node
                 # parse nodes
@@ -68,19 +71,19 @@ class Simulator:
                     v2 = node_dict[v2_index]
                     new_edge = Edge(v1, v2, int(weight), name)
                     E.append(new_edge)
-                    bn_edges.append(EdgeBNNode(new_edge, 0))
+                    bn_nodes.append(EdgeBNNode(e=new_edge, time=0))
 
         V = list(node_dict.values())
 
-        # generate the rest of the Bayes Network nodes after parsing is done
-        # order matters: vertices in each time unit before edges
+        # generate the rest of the Bayes Network nodes after parsing the initial state is done
+        # order matters: vertices in each time unit must be created before edges
         for t in range(1, Configurator.T):
             for v in V:
                 bn_nodes.append(FloodBNNode(v, t))
             for e in E:
-                bn_edges.append(EdgeBNNode(e, t))
+                bn_nodes.append(EdgeBNNode(e, t))
 
-        return Graph(V, E), BayesNetwork(bn_nodes + bn_edges)
+        return Graph(V, E), BayesNetwork(bn_nodes)
 
     def add_evidence(self):
         if TEST_MODE:
@@ -133,11 +136,44 @@ class Simulator:
         self.BN.sample_queries(flood_queries)
 
     def query_edge_block_probability(self):
-        block_queries = [{v: True} for v in self.BN.V if isinstance(v, EdgeBNNode)]
+        block_queries = [{e: True} for e in self.BN.V if isinstance(e, EdgeBNNode)]
         self.BN.sample_queries(block_queries)
 
+    def query_free_path_probability_helper(self, edges, t, verbose=True):
+        edge_bn_nodes = [self.BN.get_node(e, t) for e in edges]
+        block_query = [{e: False for e in edge_bn_nodes}]
+        return self.BN.sample_queries(block_query, verbose=verbose)
+
     def query_free_path_probability(self):
-        pass
+        try:
+            t = int(input('choose time for query:\n'))
+            edges_raw = get_list_input('type in comma separated edge indices. e.g. for E1,E5,E3 type "1,5,3"')
+            edges = ['E' + i for i in edges_raw]
+            self.query_free_path_probability_helper(edges, t)
+        except:
+            print("invalid time or edge indeces")
+
+    def query_best_probable_path(self):
+        try:
+            t = int(input('choose time for query:\n'))
+            nodes_raw = get_list_input('type in comma separated vertex indeces, e.g. "1,3" for V1,V3')
+            src, tgt = ['V' + i for i in nodes_raw]
+            path_str = '\n{0}->{{}}->{1}:'.format(src, tgt)
+            simple_paths = self.G.get_simple_paths(src, tgt)
+            paths_blockage_queries_results = []
+            for path_edges_list in simple_paths:
+                path_query, evidence, probability = self.query_free_path_probability_helper(path_edges_list, t, verbose=False)[0]
+                paths_blockage_queries_results.append((path_query, evidence, probability))
+            path_result_pairs = list(zip(simple_paths, paths_blockage_queries_results))
+            for path_edges, query in path_result_pairs:
+                print(path_str.format('->'.join(path_edges)))
+                self.BN.print_query_result(query)
+            best_path, unblocked_prob = max(path_result_pairs, key=lambda pq: pq[1][2])
+            print('\nThe best option is: {}\nP(Path is unblocked)={}\n'
+                  .format(path_str.format('->'.join(best_path)), unblocked_prob[2]))
+        except:
+            print("invalid time or vertices")
+
 
     def print_graph(self):
         self.BN.print_net()
@@ -156,26 +192,27 @@ class Simulator:
 
     def query_network(self):
         prompt = """Make your choice:
-            1 - Add Evidence
-            2 - Query Vertex Flood Probability
-            3 - Query Edge Block Probability
-            4 - Query Free Path Probability
-            5 - Print Graph
+            1 - Query Vertex Flood Probability
+            2 - Query Edge Block Probability
+            3 - Query Free Path Probability
+            4 - Query Best Probable Path
+            5 - Add Evidence
             6 - Reset Evidence
             7 - View Evidence
-            8 - Quit\n"""
+            8 - Print Graph
+            9 - Quit\n"""
 
         ops = {
-            1: self.add_evidence,
-            2: self.query_vertex_flood_probability,
-            3: self.query_edge_block_probability,
-            4: self.query_free_path_probability,
-            5: self.print_graph,
+            1: self.query_vertex_flood_probability,
+            2: self.query_edge_block_probability,
+            3: self.query_free_path_probability,
+            4: self.query_best_probable_path,
+            5: self.add_evidence,
             6: self.reset_evidence,
             7: self.view_evidence,
-            8: self.quit
+            8: self.print_graph,
+            9: self.quit
         }
-
         while True:
             i = int(input(prompt))
             if i in ops:

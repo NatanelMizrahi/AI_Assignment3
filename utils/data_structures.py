@@ -177,13 +177,22 @@ class Graph:
     def get_layout(self, G):
         return nx.spring_layout(G, scale=25)
 
-    def display(self, graph_id=0, output_path='.', save_img=False):
-        filename = '{0}/graph_{1}.png'.format(output_path, graph_id)
+    def get_simple_paths(self, src, tgt):
+        paths = []
+        V = self.get_vertices()
+        G = nx.Graph()
+        G.add_nodes_from(V)
+        G.add_weighted_edges_from([e.get() for e in self.Adj.values() if not e.blocked])
+        for path in nx.all_simple_paths(G, source=src, target=tgt):
+            path_edges = list(zip(path, path[1:]))
+            paths.append([self.Adj[e].label for e in path_edges])
+        return paths
+
+    def display(self, graph_id=0):
         V = self.get_vertices()
         G = self.get_display_graph()
         G.add_nodes_from(V)
         G.add_weighted_edges_from([e.get() for e in self.Adj.values() if not e.blocked])
-        edge_labels = nx.get_edge_attributes(G, 'weight')
         node_labels = {v: str(v) for v in G.nodes()}
         if G.number_of_nodes() == 0:
             return
@@ -191,15 +200,14 @@ class Graph:
             # save node position to maintain the same graph layout throughout simulations
             self.pos = self.get_layout(G)
         if not isinstance(self, DirectedGraph):
-            nx.draw_networkx_edge_labels(G, self.pos, edge_labels=edge_labels, rotate=False)
+            edge_labels = {k: '{},w={}'.format(e.label, e.w) for k, e in self.Adj.items()}
+            nx.draw_networkx_edge_labels(G, self.pos, edge_labels=edge_labels, rotate=False, font_size=6)
+
         nx.draw(G, self.pos, node_size=1700, with_labels=False)
         nx.draw_networkx_labels(G, self.pos, node_labels, font_size=7.5, font_weight='bold')
         plt.margins(0.2)
         plt.legend([], title=graph_id, loc='upper center')
         plt.show()
-        if save_img:
-            print("Saving graph visualization: " + os.path.abspath(filename))
-            plt.savefig(filename)
 
     @staticmethod
     def shortest_path_successor(src, target):
